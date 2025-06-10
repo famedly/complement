@@ -651,20 +651,38 @@ func (c *CSAPI) Do(t ct.TestLike, method string, paths []string, opts ...Request
 			ct.Fatalf(t, "CSAPI.Do response returned error: %s", err)
 		}
 		// debug log the response
+		// check the condition, make a copy of the response body first in case the check consumes it
+		var resBody []byte
 		if c.Debug && res != nil {
 			var dump []byte
 			dump, err = httputil.DumpResponse(res, true)
 			if err != nil {
 				ct.Fatalf(t, "CSAPI.Do failed to dump response body: %s", err)
 			}
-			t.Logf("%s", string(dump))
+			if res.Body != nil {
+				resBody, err = io.ReadAll(res.Body)
+				if err != nil {
+					ct.Fatalf(t, "CSAPI.Do failed to read response body for RetryUntil check: %s", err)
+				}
+				res.Body = io.NopCloser(bytes.NewBuffer(resBody))
+
+			}
+			if gjson.ValidBytes(resBody) {
+				var json_formatted_dump bytes.Buffer
+				err = json.Indent(&json_formatted_dump, resBody, "", "  ")
+				if err != nil {
+					t.Logf("json was invalid: %s", err)
+
+				}
+				t.Logf("%s\n%s", req.URL, json_formatted_dump.String())
+			} else {
+				t.Logf("%s\n%s", req.URL, string(dump))
+			}
 		}
-		if retryUntil == nil || retryUntil.timeout == 0 {
+		if retryUntil.timeout == 0 {
 			return res // don't retry
 		}
 
-		// check the condition, make a copy of the response body first in case the check consumes it
-		var resBody []byte
 		if res.Body != nil {
 			resBody, err = io.ReadAll(res.Body)
 			if err != nil {
@@ -713,9 +731,9 @@ func (t *loggedRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	start := time.Now()
 	res, err := t.wrap.RoundTrip(req)
 	if err != nil {
-		t.t.Logf("[CSAPI] %s %s%s => error: %s (%s)", req.Method, t.hsName, req.URL.Path, err, time.Since(start))
+		t.t.Logf("[CSAPI] %s %s%s => error: %s (%s)", req.Method, t.hsName, req.URL, err, time.Since(start))
 	} else {
-		t.t.Logf("[CSAPI] %s %s%s => %s (%s)", req.Method, t.hsName, req.URL.Path, res.Status, time.Since(start))
+		t.t.Logf("[CSAPI] %s %s%s => %s (%s)", req.Method, t.hsName, req.URL, res.Status, time.Since(start))
 	}
 	return res, err
 }
@@ -780,10 +798,10 @@ func GjsonEscape(in string) string {
 func checkArrayElements(object gjson.Result, key string, check func(gjson.Result) bool) error {
 	array := object.Get(key)
 	if !array.Exists() {
-		return fmt.Errorf("Key %s does not exist", key)
+		return fmt.Errorf("key %s does not exist", key)
 	}
 	if !array.IsArray() {
-		return fmt.Errorf("Key %s exists but it isn't an array", key)
+		return fmt.Errorf("key %s exists but it isn't an array", key)
 	}
 	goArray := array.Array()
 	for _, ev := range goArray {

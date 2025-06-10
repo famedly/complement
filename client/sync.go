@@ -137,6 +137,55 @@ func (c *CSAPI) MustSyncUntil(t ct.TestLike, syncReq SyncReq, checks ...SyncChec
 	}
 }
 
+// A copy of MustSyncUntil that also returns the last response instead of just the next batch token
+func (c *CSAPI) MustSyncUntilAndReturnResponse(t ct.TestLike, syncReq SyncReq, checks ...SyncCheckOpt) (gjson.Result, string) {
+	t.Helper()
+	start := time.Now()
+	numResponsesReturned := 0
+	checkers := make([]struct {
+		check SyncCheckOpt
+		errs  []string
+	}, len(checks))
+	for i := range checks {
+		c := checkers[i]
+		c.check = checks[i]
+		checkers[i] = c
+	}
+	printErrors := func() string {
+		err := "Checkers:\n"
+		for _, c := range checkers {
+			err += strings.Join(c.errs, "\n")
+			err += ", \n"
+		}
+		return err
+	}
+	for {
+		if time.Since(start) > c.SyncUntilTimeout {
+			ct.Fatalf(t, "%s MustSyncUntil: timed out after %v. Seen %d /sync responses. %s", c.UserID, time.Since(start), numResponsesReturned, printErrors())
+		}
+		response, nextBatch := c.MustSync(t, syncReq)
+		syncReq.Since = nextBatch
+		numResponsesReturned += 1
+
+		for i := 0; i < len(checkers); i++ {
+			err := checkers[i].check(c.UserID, response)
+			if err == nil {
+				// check passed, removed from checkers
+				checkers = append(checkers[:i], checkers[i+1:]...)
+				i--
+			} else {
+				c := checkers[i]
+				c.errs = append(c.errs, fmt.Sprintf("[t=%v] Response #%d: %s", time.Since(start), numResponsesReturned, err))
+				checkers[i] = c
+			}
+		}
+		if len(checkers) == 0 {
+			// every checker has passed!
+			return response, syncReq.Since
+		}
+	}
+}
+
 // Perform a single /sync request with the given request options. To sync until something happens,
 // see `MustSyncUntil`.
 //

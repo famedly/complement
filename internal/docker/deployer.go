@@ -222,7 +222,7 @@ func (d *Deployer) Destroy(dep *Deployment, printServerLogs bool, testName strin
 		if printServerLogs {
 			// If we want the logs we gracefully stop the containers to allow
 			// the logs to be flushed.
-			oneSecond := 1
+			oneSecond := 10
 			err := d.Docker.ContainerStop(context.Background(), hsDep.ContainerID, container.StopOptions{
 				Timeout: &oneSecond,
 			})
