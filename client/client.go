@@ -200,6 +200,13 @@ func (c *CSAPI) MustInviteRoom(t ct.TestLike, roomID string, userID string) {
 	mustRespond2xx(t, res)
 }
 
+// InviteRoom invites userID to the room ID, with the expectation to fail because of the invite checker.
+func (c *CSAPI) Must403FailInviteRoom(t ct.TestLike, roomID string, userID string) {
+	t.Helper()
+	res := c.InviteRoom(t, roomID, userID)
+	mustRespond403(t, res)
+}
+
 // InviteRoom invites userID to the room ID, else fails the test.
 func (c *CSAPI) InviteRoom(t ct.TestLike, roomID string, userID string) *http.Response {
 	t.Helper()
@@ -858,4 +865,13 @@ func mustRespond2xx(t ct.TestLike, res *http.Response) {
 	defer res.Body.Close()
 	body, _ := io.ReadAll(res.Body)
 	ct.Fatalf(t, "CSAPI.Must: %s %s returned non-2xx code: %s - body: %s", res.Request.Method, res.Request.URL.String(), res.Status, string(body))
+}
+
+func mustRespond403(t ct.TestLike, res *http.Response) {
+	if res.StatusCode == 403 {
+		return // 403
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	ct.Fatalf(t, "CSAPI.Must: %s %s returned non-403 code: %s - body: %s", res.Request.Method, res.Request.URL.String(), res.Status, string(body))
 }
