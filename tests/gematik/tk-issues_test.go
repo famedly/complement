@@ -28,8 +28,8 @@ func TestFederationRoomsMessagesAfterJoin(t *testing.T) {
 	//  Charlie begins joining the room
 	//  Charlie finishes joining the room(the /join response returns) and issues a /messages request
 
-	//  * Using the /join response as the /messages trigger seems to trigger /backfill before the room is done being un-partial-stated 
-	// 		so will be paused until that is finished(due to getting a list of hosts in the room to backfill from). In practice, this 
+	//  * Using the /join response as the /messages trigger seems to trigger /backfill before the room is done being un-partial-stated
+	// 		so will be paused until that is finished(due to getting a list of hosts in the room to backfill from). In practice, this
 	// 		does not seem to cause the issue directly.
 	//
 	// Use the fact that goroutines seem to occur in a LIFO manner, and gate some requests on various responses
@@ -57,6 +57,14 @@ func TestFederationRoomsMessagesAfterJoin(t *testing.T) {
 			"type": "de.gematik.tim.roomtype.default.v1",
 		},
 		"initial_state": []interface{}{
+			// {"type":"m.room.history_visibility","content":{"history_visibility":"invited"},"state_key":""}
+			map[string]interface{}{
+				"type":      "m.room.history_visibility",
+				"state_key": "",
+				"content": map[string]interface{}{
+					"history_visibility": "invited",
+				},
+			},
 			map[string]interface{}{
 				"type":      "de.gematik.tim.room.name",
 				"state_key": "",
