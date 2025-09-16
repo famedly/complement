@@ -72,7 +72,7 @@ func TestGedisaIssueMissingMessages(t *testing.T) {
 
 	go func(event_id_chan chan string) {
 		// We will call this messageB
-		time.Sleep(90 * time.Millisecond)
+		time.Sleep(0 * time.Millisecond)
 
 		fmt.Println("ALICE SENDING MESSAGE B*************")
 		// by not using the safe version of send event, it allows for not waiting for processing to finish
