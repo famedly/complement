@@ -11,19 +11,17 @@ import (
 )
 
 func TestAvatarUrlUpdate(t *testing.T) {
-	testProfileFieldUpdate(t, "avatar_url")
+	testProfileFieldUpdate(t, "avatar_url", "mxc://example.com/LemurLover")
 }
 
 func TestDisplayNameUpdate(t *testing.T) {
-	testProfileFieldUpdate(t, "displayname")
+	testProfileFieldUpdate(t, "displayname", "LemurLover")
 }
 
 // sytest: $datum updates affect room member events
-func testProfileFieldUpdate(t *testing.T, field string) {
+func testProfileFieldUpdate(t *testing.T, field string, bogusData string) {
 	deployment := complement.Deploy(t, 1)
 	defer deployment.Destroy(t)
-
-	const bogusData = "LemurLover"
 
 	alice := deployment.Register(t, "hs1", helpers.RegistrationOpts{})
 
