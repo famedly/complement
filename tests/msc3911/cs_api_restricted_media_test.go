@@ -2,6 +2,7 @@ package tests
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/matrix-org/complement"
@@ -233,5 +234,41 @@ func TestRestrictedMediaUnstable(t *testing.T) {
 			t.Fatalf("Media is differing and should be identical")
 		}
 
+	})
+
+	// Test the media copy endpoint can produce a byte identical copy of a piece of media while also changing it's mxc uri
+	t.Run("TestMediaCopy", func(t *testing.T) {
+		// alice has an existing global profile avatar, it's mxc is available at aliceGlobalProfileAvatarMxcUri
+		// it's []byte is available at aliceOriginalProfileBytes
+		// We will reuse that and copy it
+
+		// There seem to be no existing utilities to split an mxc uri into it's components, which is needed for the copy endpoint.
+		// Mxc uri's are formatted as "mxc://server_name/media_id"
+
+		// Cut the "mxc://" off the front
+		existSplitMxc, found := strings.CutPrefix(aliceGlobalProfileAvatarMxcUri, "mxc://")
+		if !found {
+			t.Fatalf("mxc was malformed %s", aliceGlobalProfileAvatarMxcUri)
+		}
+		// Split the remaining into the server name and the media id
+		mxcComponents := strings.Split(existSplitMxc, "/")
+
+		// Use bob to make the copy. The media should be viewable as it's a global profile
+		res := bob.MustDo(t, "POST", []string{"_matrix", "client", "unstable", "org.matrix.msc3911", "media", "copy", mxcComponents[0], mxcComponents[1]}, client.WithJSONBody(t, map[string]any{}))
+
+		body := client.ParseJSON(t, res)
+		newMxcUri := client.GetJSONFieldStr(t, body, "content_uri")
+
+		aliceNewAvatarBytes, _ := bob.DownloadContentAuthenticated(t, newMxcUri)
+		if !bytes.Equal(aliceOriginalProfileBytes, aliceNewAvatarBytes) {
+			t.Fatalf("Media is differing and should be identical")
+		}
+
+	})
+
+	t.Run("TestMediaCopyNonexistingFile", func(t *testing.T) {
+		// cheat a little on making a media id, it should not exist after all
+		response := bob.Do(t, "POST", []string{"_matrix", "client", "unstable", "org.matrix.msc3911", "media", "copy", "hs1", "fAkEYfaKeyMeDiAId"}, client.WithJSONBody(t, map[string]any{}))
+		must.MatchResponse(t, response, match.HTTPResponse{StatusCode: 404})
 	})
 }
