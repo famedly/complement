@@ -1,7 +1,6 @@
 package tests
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/matrix-org/complement"
@@ -16,7 +15,6 @@ func TestMain(m *testing.M) {
 
 // Create a room with a history visibility as specificed
 func MustCreateRoomWithHistoryVisibility(t *testing.T, creatingUserClient *client.CSAPI, historyVisiblity string) string {
-	// t.Helper()
 	roomID := creatingUserClient.MustCreateRoom(t, map[string]interface{}{
 		"preset":       "public_chat",
 		"name":         "Room",
@@ -69,29 +67,4 @@ func MustUploadMediaAttachToMembershipEventAndSendIntoRoom(t *testing.T, sending
 	// alice sends message with extra query parameter
 	event_id := sendingUser.SendEventWithAttachedMediaSynced(t, roomID, picture_message, mxcUri)
 	return mxcUri, event_id
-}
-
-// Have userLooking retrieve the membership state event from the roomID for observedUserID, download the media assigned
-// in the avatar of the membership event, and compare the bytes to see that they are identical to the original profile.
-// Return the mxcUri of the membership's avatar
-func MustSeeMembershipAvatarAndMatchOriginal(t *testing.T, userLooking client.CSAPI, observedUser client.CSAPI, roomID string, originalMediaBytes []byte) string {
-	// t.Helper()
-	// observedUser should already have a profile avatar. The membership of a given room should have set an avatar based
-	// on that global. It will be a "copy", so the mxcUri will be different from the global version, but should be
-	// byte-identical.
-	// Use that user to retrieve the content of the state event so we can extract the new "copied" mxc uri. The
-	// userLooking may or may not actually be joined to the room. Being joined to the room per state is not the point of
-	// these tests
-	membership_content := observedUser.MustGetStateEventContent(t, roomID, "m.room.member", observedUser.UserID)
-	membership_mxcUri := membership_content.Get("avatar_url").Str
-
-	// the userLooking not be allowed to see this media will fail the test
-	mxcPayload2, _ := userLooking.DownloadContentAuthenticated(t, membership_mxcUri)
-
-	areEqual := bytes.Equal(originalMediaBytes, mxcPayload2)
-	if areEqual != true {
-		t.Fatalf("Media is differing and should be identical")
-	}
-
-	return membership_mxcUri
 }
