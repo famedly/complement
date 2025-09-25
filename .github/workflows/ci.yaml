@@ -7,10 +7,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  check-signoff:
-    if: "github.event_name == 'pull_request'"
-    uses: "matrix-org/backend-meta/.github/workflows/sign-off.yml@v2"
-
   complement-internal:
     runs-on: ubuntu-latest
     steps:
