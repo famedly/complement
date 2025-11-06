@@ -71,6 +71,14 @@ func (c *CSAPI) CreateMedia(t ct.TestLike) string {
 	return GetJSONFieldStr(t, body, "content_uri")
 }
 
+// CreateMedia creates an MXC URI for asynchronous media uploads.
+func (c *CSAPI) MustCreateMediaRestricted(t ct.TestLike) string {
+	t.Helper()
+	res := c.MustDo(t, "POST", []string{"_matrix", "client", "unstable", "org.matrix.msc3911", "media", "create"})
+	body := ParseJSON(t, res)
+	return GetJSONFieldStr(t, body, "content_uri")
+}
+
 // UploadMediaAsync uploads the provided content to the given server and media ID. Fails the test on error.
 func (c *CSAPI) UploadMediaAsync(t ct.TestLike, serverName, mediaID string, fileBody []byte, fileName string, contentType string) {
 	t.Helper()
@@ -99,6 +107,23 @@ func (c *CSAPI) UploadContent(t ct.TestLike, fileBody []byte, fileName string, c
 	return GetJSONFieldStr(t, body, "content_uri")
 }
 
+// MustUploadContentRestricted uploads the provided content with and attachment parameter and an optional file name. Fails the test on error. Returns the MXC URI.
+func (c *CSAPI) MustUploadContentRestricted(t ct.TestLike, fileBody []byte, fileName string, contentType string) string {
+	t.Helper()
+	query := url.Values{}
+	if fileName != "" {
+		query.Set("filename", fileName)
+	}
+	res := c.Do(
+		// /_matrix/client/unstable/org.matrix.msc3911/media/upload
+		t, "POST", []string{"_matrix", "client", "unstable", "org.matrix.msc3911", "media", "upload"},
+		WithRawBody(fileBody), WithContentType(contentType), WithQueries(query),
+	)
+	mustRespond2xx(t, res)
+	body := ParseJSON(t, res)
+	return GetJSONFieldStr(t, body, "content_uri")
+}
+
 // DownloadContent downloads media from the server, returning the raw bytes and the Content-Type. Fails the test on error.
 func (c *CSAPI) DownloadContent(t ct.TestLike, mxcUri string) ([]byte, string) {
 	t.Helper()
@@ -123,6 +148,16 @@ func (c *CSAPI) DownloadContentAuthenticated(t ct.TestLike, mxcUri string) ([]by
 		ct.Errorf(t, err.Error())
 	}
 	return b, contentType
+}
+
+// UncheckedDownloadContentAuthenticated makes the raw request for a piece of media and returns the http.Response.
+// Response is unchecked in any way. The existing DownloadContentAuthenticated() should have been a "Must" variant. Rather
+// than refactor that across the code base, this version just uses an explicit name
+func (c *CSAPI) UncheckedDownloadContentAuthenticated(t ct.TestLike, mxcUri string) *http.Response {
+	t.Helper()
+	origin, mediaId := SplitMxc(mxcUri)
+	res := c.Do(t, "GET", []string{"_matrix", "client", "v1", "media", "download", origin, mediaId})
+	return res
 }
 
 // MustCreateRoom creates a room with an optional HTTP request body. Fails the test on error. Returns the room ID.
@@ -337,6 +372,15 @@ func (c *CSAPI) Unsafe_SendEventUnsynced(t ct.TestLike, roomID string, e b.Event
 	return c.Unsafe_SendEventUnsyncedWithTxnID(t, roomID, e, strconv.Itoa(txnID))
 }
 
+// Unsafe_SendEventWithAttachedMediaUnsynced sends `e` with a media attachment into the room. This function is UNSAFE as it does not wait
+// for the event to be fully processed. This can cause flakey tests. Prefer `SendEventSynced`.
+// Returns the event ID of the sent event.
+func (c *CSAPI) Unsafe_SendEventWithAttachedMediaUnsynced(t ct.TestLike, roomID string, e b.Event, mxcUri string) string {
+	t.Helper()
+	txnID := int(atomic.AddInt64(&c.txnID, 1))
+	return c.Unsafe_SendEventWithAttachedMediaUnsyncedWithTxnID(t, roomID, e, mxcUri, strconv.Itoa(txnID))
+}
+
 // SendEventUnsyncedWithTxnID sends `e` into the room with a prescribed transaction ID.
 // This is useful for writing tests that interrogate transaction semantics. This function is UNSAFE
 // as it does not wait for the event to be fully processed. This can cause flakey tests. Prefer `SendEventSynced`.
@@ -356,11 +400,46 @@ func (c *CSAPI) Unsafe_SendEventUnsyncedWithTxnID(t ct.TestLike, roomID string, 
 	return eventID
 }
 
+// Unsafe_SendEventWithAttachedMediaUnsyncedWithTxnID sends `e` with a media attachment into the room with a prescribed transaction ID.
+// This is useful for writing tests that interrogate transaction semantics. This function is UNSAFE
+// as it does not wait for the event to be fully processed. This can cause flakey tests. Prefer `SendEventSynced`.
+// Returns the event ID of the sent event.
+func (c *CSAPI) Unsafe_SendEventWithAttachedMediaUnsyncedWithTxnID(t ct.TestLike, roomID string, e b.Event, mxcUri string, txnID string) string {
+	t.Helper()
+	paths := []string{"_matrix", "client", "v3", "rooms", roomID, "send", e.Type, txnID}
+	if e.StateKey != nil {
+		paths = []string{"_matrix", "client", "v3", "rooms", roomID, "state", e.Type, *e.StateKey}
+	}
+	if e.Sender != "" && e.Sender != c.UserID {
+		ct.Fatalf(t, "Event.Sender must not be set, as this is set by the client in use (%s)", c.UserID)
+	}
+	queries := url.Values{}
+	if mxcUri != "" {
+		queries.Add("org.matrix.msc3911.attach_media", mxcUri)
+	}
+	res := c.MustDo(t, "PUT", paths, WithJSONBody(t, e.Content), WithQueries(queries))
+	body := ParseJSON(t, res)
+	eventID := GetJSONFieldStr(t, body, "event_id")
+	return eventID
+}
+
 // SendEventSynced sends `e` into the room and waits for its event ID to come down /sync.
 // Returns the event ID of the sent event.
 func (c *CSAPI) SendEventSynced(t ct.TestLike, roomID string, e b.Event) string {
 	t.Helper()
 	eventID := c.Unsafe_SendEventUnsynced(t, roomID, e)
+	t.Logf("SendEventSynced waiting for event ID %s", eventID)
+	c.MustSyncUntil(t, SyncReq{}, SyncTimelineHas(roomID, func(r gjson.Result) bool {
+		return r.Get("event_id").Str == eventID
+	}))
+	return eventID
+}
+
+// SendEventWithAttachedMediaSynced sends `e` with a media attachment into the room and waits for its event ID to come down /sync.
+// Returns the event ID of the sent event.
+func (c *CSAPI) SendEventWithAttachedMediaSynced(t ct.TestLike, roomID string, e b.Event, mxcUri string) string {
+	t.Helper()
+	eventID := c.Unsafe_SendEventWithAttachedMediaUnsynced(t, roomID, e, mxcUri)
 	t.Logf("SendEventSynced waiting for event ID %s", eventID)
 	c.MustSyncUntil(t, SyncReq{}, SyncTimelineHas(roomID, func(r gjson.Result) bool {
 		return r.Get("event_id").Str == eventID
@@ -439,6 +518,17 @@ func (c *CSAPI) GetDefaultRoomVersion(t ct.TestLike) gomatrixserverlib.RoomVersi
 	}
 
 	return gomatrixserverlib.RoomVersion(defaultVersion.Str)
+}
+
+// GetVersions queries the server's client versions
+func (c *CSAPI) GetVersions(t ct.TestLike) []byte {
+	t.Helper()
+	res := c.MustDo(t, "GET", []string{"_matrix", "client", "versions"})
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		ct.Fatalf(t, "unable to read response body: %v", err)
+	}
+	return body
 }
 
 // MustUploadKeys uploads device and/or one time keys to the server, returning the current OTK counts.
@@ -545,8 +635,17 @@ func (c *CSAPI) MustGenerateOneTimeKeys(t ct.TestLike, otkCount uint) (deviceKey
 
 // MustSetDisplayName sets the global display name for this account or fails the test.
 func (c *CSAPI) MustSetDisplayName(t ct.TestLike, displayname string) {
+	t.Helper()
 	c.MustDo(t, "PUT", []string{"_matrix", "client", "v3", "profile", c.UserID, "displayname"}, WithJSONBody(t, map[string]any{
 		"displayname": displayname,
+	}))
+}
+
+// MustSetDisplayName sets the global display name for this account or fails the test.
+func (c *CSAPI) MustSetProfileAvatar(t ct.TestLike, mxcUri string) {
+	t.Helper()
+	c.MustDo(t, "PUT", []string{"_matrix", "client", "v3", "profile", c.UserID, "avatar_url"}, WithJSONBody(t, map[string]any{
+		"avatar_url": mxcUri,
 	}))
 }
 
