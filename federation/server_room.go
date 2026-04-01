@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 
@@ -333,15 +334,22 @@ func InitialRoomEvents(roomVer gomatrixserverlib.RoomVersion, creator string) []
 			Type:     "m.room.create",
 			StateKey: b.Ptr(""),
 			Sender:   creator,
-			Content: map[string]interface{}{
-				"creator":      creator,
-				"room_version": roomVer,
-				// We have to add randomness to the create event, else if you create 2x v12+ rooms in the same millisecond
-				// they will get the same room ID, clobbering internal data structures and causing extremely confusing
-				// behaviour. By adding this entropy, we ensure that even if rooms are created in the same millisecond, their
-				// hashes will not be the same.
-				"complement_entropy": util.RandomString(18),
-			},
+			Content: func() map[string]interface{} {
+				content := map[string]interface{}{
+					"room_version": roomVer,
+					// We have to add randomness to the create event, else if you create 2x v12+ rooms in the same millisecond
+					// they will get the same room ID, clobbering internal data structures and causing extremely confusing
+					// behaviour. By adding this entropy, we ensure that even if rooms are created in the same millisecond, their
+					// hashes will not be the same.
+					"complement_entropy": util.RandomString(18),
+				}
+				// The creator field was removed in room version 11 (MSC4239).
+				n, err := strconv.Atoi(string(roomVer))
+				if err != nil || n < 11 {
+					content["creator"] = creator
+				}
+				return content
+			}(),
 		},
 		{
 			Type:     "m.room.member",
