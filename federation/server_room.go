@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strconv"
 	"sync"
 	"time"
 
@@ -343,9 +342,7 @@ func InitialRoomEvents(roomVer gomatrixserverlib.RoomVersion, creator string) []
 					// hashes will not be the same.
 					"complement_entropy": util.RandomString(18),
 				}
-				// The creator field was removed in room version 11 (MSC4239).
-				n, err := strconv.Atoi(string(roomVer))
-				if err != nil || n < 11 {
+				if gomatrixserverlib.MustGetRoomVersion(gomatrixserverlib.RoomVersion(roomVer)).CreatorInCreateEvent() {
 					content["creator"] = creator
 				}
 				return content
