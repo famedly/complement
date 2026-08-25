@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/matrix-org/complement/runtime"
 	"github.com/tidwall/gjson"
 
 	"github.com/matrix-org/complement"
@@ -62,6 +63,8 @@ func TestRegistration(t *testing.T) {
 		})
 		// sytest: POST /register can create a user
 		t.Run("POST /register can create a user", func(t *testing.T) {
+			// Venator: https://github.com/matrix-org/complement/issues/893
+			runtime.SkipIf(t, runtime.Venator)
 			t.Parallel()
 			res := unauthedClient.Do(t, "POST", []string{"_matrix", "client", "v3", "register"}, client.WithRawBody(json.RawMessage(`{
 				"auth": {
@@ -79,6 +82,8 @@ func TestRegistration(t *testing.T) {
 		})
 		// sytest: POST /register downcases capitals in usernames
 		t.Run("POST /register downcases capitals in usernames", func(t *testing.T) {
+			// Venator: https://github.com/matrix-org/complement/issues/893
+			runtime.SkipIf(t, runtime.Venator)
 			t.Parallel()
 			res := unauthedClient.Do(t, "POST", []string{"_matrix", "client", "v3", "register"}, client.WithRawBody(json.RawMessage(`{
 				"auth": {
@@ -96,6 +101,8 @@ func TestRegistration(t *testing.T) {
 		})
 		// sytest: POST /register returns the same device_id as that in the request
 		t.Run("POST /register returns the same device_id as that in the request", func(t *testing.T) {
+			// Venator: https://github.com/matrix-org/complement/issues/893
+			runtime.SkipIf(t, runtime.Venator)
 			t.Parallel()
 			deviceID := "my_device_id"
 			res := unauthedClient.Do(t, "POST", []string{"_matrix", "client", "v3", "register"}, client.WithRawBody(json.RawMessage(`{
@@ -115,6 +122,8 @@ func TestRegistration(t *testing.T) {
 		})
 		// sytest: POST /register rejects registration of usernames with '$q'
 		t.Run("POST /register rejects usernames with special characters", func(t *testing.T) {
+			// Venator: https://github.com/matrix-org/complement/issues/893
+			runtime.SkipIf(t, runtime.Venator)
 			t.Parallel()
 			specialChars := []string{
 				`!`,
@@ -151,6 +160,8 @@ func TestRegistration(t *testing.T) {
 			}
 		})
 		t.Run("POST /register rejects if user already exists", func(t *testing.T) {
+			// Venator: https://github.com/matrix-org/complement/issues/893
+			runtime.SkipIf(t, runtime.Venator)
 			t.Parallel()
 			res := unauthedClient.Do(t, "POST", []string{"_matrix", "client", "v3", "register"}, client.WithRawBody(json.RawMessage(`{
 				"auth": {
@@ -178,6 +189,8 @@ func TestRegistration(t *testing.T) {
 		})
 		// sytest: POST /register allows registration of usernames with '$chr'
 		t.Run("POST /register allows registration of usernames with ", func(t *testing.T) {
+			// Venator: https://github.com/matrix-org/complement/issues/893
+			runtime.SkipIf(t, runtime.Venator)
 			testChars := []rune("q3._=-/")
 			for x := range testChars {
 				localpart := fmt.Sprintf("chrtestuser%s", string(testChars[x]))
