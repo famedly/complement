@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/matrix-org/complement"
+	"github.com/matrix-org/complement/runtime"
 	"github.com/matrix-org/gomatrixserverlib"
 	"github.com/matrix-org/gomatrixserverlib/spec"
 	"github.com/tidwall/gjson"
@@ -40,6 +41,8 @@ func TestKnocking(t *testing.T) {
 }
 
 func doTestKnocking(t *testing.T, roomVersion string, joinRule string) {
+	// Venator: does not yet implement federation.
+	runtime.SkipIf(t, runtime.Venator)
 	deployment := complement.Deploy(t, 2)
 	defer deployment.Destroy(t)
 
@@ -163,12 +166,10 @@ func knockingBetweenTwoUsersTest(
 			}
 		}
 
-		inRoomUser.MustSyncUntil(t, client.SyncReq{}, client.SyncTimelineHas(roomID, func(ev gjson.Result) bool {
-			if ev.Get("type").Str != "m.room.member" || ev.Get("sender").Str != knockingUser.UserID {
-				return false
-			}
-			must.Equal(t, ev.Get("content").Get("reason").Str, testKnockReason, "incorrect reason for knock")
-			must.Equal(t, ev.Get("content").Get("membership").Str, "knock", "incorrect membership for knocking user")
+		inRoomUser.MustSyncUntil(t, client.SyncReq{}, client.SyncKnockedOn(knockingUser.UserID, roomID, func(ev gjson.Result) bool {
+			must.MatchGJSON(t, ev,
+				match.JSONKeyEqual("content.reason", testKnockReason),
+			)
 			return true
 		}))
 	})
@@ -224,11 +225,7 @@ func knockingBetweenTwoUsersTest(
 		)
 
 		// Wait until the leave membership event has come down sync
-		inRoomUser.MustSyncUntil(t, client.SyncReq{}, client.SyncTimelineHas(roomID, func(ev gjson.Result) bool {
-			return ev.Get("type").Str != "m.room.member" ||
-				ev.Get("state_key").Str != knockingUser.UserID ||
-				ev.Get("content").Get("membership").Str != "leave"
-		}))
+		inRoomUser.MustSyncUntil(t, client.SyncReq{}, client.SyncLeftFrom(knockingUser.UserID, roomID))
 
 		// Knock again
 		mustKnockOnRoomSynced(t, knockingUser, roomID, "Pleeease let me in?", []spec.ServerName{
@@ -258,11 +255,7 @@ func knockingBetweenTwoUsersTest(
 		inRoomUser.MustInviteRoom(t, roomID, knockingUser.UserID)
 
 		// Wait until the invite membership event has come down sync
-		inRoomUser.MustSyncUntil(t, client.SyncReq{}, client.SyncTimelineHas(roomID, func(ev gjson.Result) bool {
-			return ev.Get("type").Str != "m.room.member" ||
-				ev.Get("state_key").Str != knockingUser.UserID ||
-				ev.Get("content").Get("membership").Str != "invite"
-		}))
+		inRoomUser.MustSyncUntil(t, client.SyncReq{}, client.SyncInvitedTo(knockingUser.UserID, roomID))
 	})
 
 	t.Run("A user cannot knock on a room they are already invited to", func(t *testing.T) {
@@ -299,38 +292,12 @@ func knockingBetweenTwoUsersTest(
 		)
 
 		// Wait until the ban membership event has come down sync
-		inRoomUser.MustSyncUntil(t, client.SyncReq{}, client.SyncTimelineHas(roomID, func(ev gjson.Result) bool {
-			return ev.Get("type").Str != "m.room.member" ||
-				ev.Get("state_key").Str != knockingUser.UserID ||
-				ev.Get("content").Get("membership").Str != "ban"
-		}))
+		inRoomUser.MustSyncUntil(t, client.SyncReq{}, client.SyncBannedFrom(knockingUser.UserID, roomID))
 
 		knockOnRoomWithStatus(t, knockingUser, roomID, "I didn't mean it!", []spec.ServerName{
 			deployment.GetFullyQualifiedHomeserverName(t, "hs1"),
 		}, 403)
 	})
-}
-
-func syncKnockedOn(userID, roomID string) client.SyncCheckOpt {
-	return func(clientUserID string, topLevelSyncJSON gjson.Result) error {
-		// two forms which depend on what the client user is:
-		// - passively viewing a membership for a room you're joined in
-		// - actively leaving the room
-		if clientUserID == userID {
-			events := topLevelSyncJSON.Get("rooms.knock." + client.GjsonEscape(roomID) + ".knock_state.events")
-			if events.Exists() && events.IsArray() {
-				// We don't currently define any required state event types to be sent.
-				// If we've reached this point, then an entry for this room was found
-				return nil
-			}
-			return fmt.Errorf("no knock section for room %s", roomID)
-		}
-
-		// passive
-		return client.SyncTimelineHas(roomID, func(ev gjson.Result) bool {
-			return ev.Get("type").Str == "m.room.member" && ev.Get("state_key").Str == userID && ev.Get("content.membership").Str == "knock"
-		})(clientUserID, topLevelSyncJSON)
-	}
 }
 
 // mustKnockOnRoomSynced will knock on a given room on the behalf of a user, and block until the knock has persisted.
@@ -339,12 +306,12 @@ func syncKnockedOn(userID, roomID string) client.SyncCheckOpt {
 //
 // Args:
 //   - `serverNames`: The list of servers to attempt to knock on the room through.
-//     These should be a resolvable addresses within the deplyment network.
+//     These should be a resolvable address within the deployment network.
 func mustKnockOnRoomSynced(t *testing.T, c *client.CSAPI, roomID, reason string, serverNames []spec.ServerName) {
 	knockOnRoomWithStatus(t, c, roomID, reason, serverNames, 200)
 
 	// The knock should have succeeded. Block until we see the knock appear down sync
-	c.MustSyncUntil(t, client.SyncReq{}, syncKnockedOn(c.UserID, roomID))
+	c.MustSyncUntil(t, client.SyncReq{}, client.SyncKnockedOn(c.UserID, roomID))
 }
 
 // knockOnRoomWithStatus will knock on a given room on the behalf of a user.
@@ -353,7 +320,7 @@ func mustKnockOnRoomSynced(t *testing.T, c *client.CSAPI, roomID, reason string,
 //
 // Args:
 //   - `serverNames`: The list of servers to attempt to knock on the room through.
-//     These should be a resolvable addresses within the deployment network.
+//     These should be a resolvable address within the deployment network.
 func knockOnRoomWithStatus(t *testing.T, c *client.CSAPI, roomID, reason string, serverNames []spec.ServerName, expectedStatus int) {
 	b := []byte("{}")
 	var err error
@@ -397,6 +364,8 @@ func knockOnRoomWithStatus(t *testing.T, c *client.CSAPI, roomID, reason string,
 // representing a knock room. For sanity-checking, this test will also create a public room and ensure it has a
 // 'join_rule' representing a publicly-joinable room.
 func TestKnockRoomsInPublicRoomsDirectory(t *testing.T) {
+	// Venator: does not support room v7 (>=v10 only)
+	runtime.SkipIf(t, runtime.Venator)
 	// v7 is required for knocking
 	doTestKnockRoomsInPublicRoomsDirectory(t, "7", "knock")
 }
@@ -487,6 +456,8 @@ func publishAndCheckRoomJoinRule(t *testing.T, c *client.CSAPI, roomID, expected
 
 // TestCannotSendNonKnockViaSendKnock checks that we cannot submit anything via /send_knock except a knock
 func TestCannotSendNonKnockViaSendKnock(t *testing.T) {
+	// Venator: does not yet implement federation, nor room v7 (>=v10 only)
+	runtime.SkipIf(t, runtime.Venator)
 	testValidationForSendMembershipEndpoint(t, "/_matrix/federation/v1/send_knock", "knock",
 		map[string]interface{}{
 			"preset":       "public_chat",

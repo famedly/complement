@@ -11,6 +11,7 @@ import (
 	"github.com/matrix-org/complement/helpers"
 	"github.com/matrix-org/complement/match"
 	"github.com/matrix-org/complement/must"
+	"github.com/matrix-org/gomatrixserverlib"
 	"github.com/matrix-org/gomatrixserverlib/spec"
 )
 
@@ -79,20 +80,12 @@ func TestRoomMembers(t *testing.T) {
 				},
 			})
 
-			bob.MustSyncUntil(t, client.SyncReq{}, client.SyncTimelineHas(
-				roomID,
-				func(ev gjson.Result) bool {
-					if ev.Get("type").Str != "m.room.member" || ev.Get("state_key").Str != bob.UserID {
-						return false
-					}
-					must.Equal(t, ev.Get("content").Get("membership").Str, "join", "Bob failed to join the room")
-					return true
-				},
-			))
+			bob.MustSyncUntil(t, client.SyncReq{}, client.SyncJoinedTo(bob.UserID, roomID))
 		})
 		// sytest: Test that we can be reinvited to a room we created
 		t.Run("Test that we can be reinvited to a room we created", func(t *testing.T) {
 			t.Parallel()
+			defaultRoomVersion := alice.GetDefaultRoomVersion(t)
 			roomID := alice.MustCreateRoom(t, map[string]interface{}{
 				"preset": "private_chat",
 			})
@@ -110,26 +103,25 @@ func TestRoomMembers(t *testing.T) {
 			alice.SendEventSynced(t, roomID, b.Event{
 				Type:     "m.room.power_levels",
 				StateKey: &stateKey,
-				Content: map[string]interface{}{
-					"invite": 100,
-					"users": map[string]interface{}{
-						alice.UserID: 100,
-						bob.UserID:   100,
-					},
-				},
+				Content: func() map[string]interface{} {
+					content := map[string]interface{}{
+						"invite": 100,
+						"users": map[string]int64{
+							bob.UserID:   100,
+							alice.UserID: 100,
+						},
+					}
+					if gomatrixserverlib.MustGetRoomVersion(defaultRoomVersion).PrivilegedCreators() {
+						delete(content["users"].(map[string]int64), alice.UserID)
+					}
+					return content
+				}(),
 			})
 
 			alice.MustLeaveRoom(t, roomID)
 
 			// Wait until alice has left the room
-			bob.MustSyncUntil(t, client.SyncReq{}, client.SyncTimelineHas(
-				roomID,
-				func(ev gjson.Result) bool {
-					return ev.Get("type").Str == "m.room.member" &&
-						ev.Get("content.membership").Str == "leave" &&
-						ev.Get("state_key").Str == alice.UserID
-				},
-			))
+			bob.MustSyncUntil(t, client.SyncReq{}, client.SyncLeftFrom(alice.UserID, roomID))
 
 			bob.MustInviteRoom(t, roomID, alice.UserID)
 			since := alice.MustSyncUntil(t, client.SyncReq{}, client.SyncInvitedTo(alice.UserID, roomID))
@@ -203,12 +195,7 @@ func TestRoomMembers(t *testing.T) {
 			})
 			res := alice.Do(t, "POST", []string{"_matrix", "client", "v3", "rooms", roomID, "ban"}, banBody)
 			must.MatchResponse(t, res, match.HTTPResponse{StatusCode: 200})
-			alice.MustSyncUntil(t, client.SyncReq{}, client.SyncTimelineHas(roomID, func(ev gjson.Result) bool {
-				if ev.Get("type").Str != "m.room.member" || ev.Get("state_key").Str != bob.UserID {
-					return false
-				}
-				return ev.Get("content.membership").Str == "ban"
-			}))
+			alice.MustSyncUntil(t, client.SyncReq{}, client.SyncBannedFrom(bob.UserID, roomID))
 			// verify bob is banned
 			content := alice.MustGetStateEventContent(t, roomID, "m.room.member", bob.UserID)
 			must.MatchGJSON(t, content, match.JSONKeyEqual("membership", "ban"))

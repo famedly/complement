@@ -7,6 +7,7 @@ import (
 	"github.com/matrix-org/complement/b"
 	"github.com/matrix-org/complement/client"
 	"github.com/matrix-org/complement/internal/data"
+	"github.com/tidwall/gjson"
 )
 
 func TestMain(m *testing.M) {
@@ -46,7 +47,7 @@ func MustUploadMediaAttachToMessageEventAndSendIntoRoom(t *testing.T, sendingUse
 		},
 		Sender: sendingUser.UserID,
 	}
-	// alice sends message with extra query parameter
+
 	event_id := sendingUser.SendEventWithAttachedMediaSynced(t, roomID, picture_message, mxcUri)
 	return mxcUri, event_id
 }
@@ -64,7 +65,19 @@ func MustUploadMediaAttachToMembershipEventAndSendIntoRoom(t *testing.T, sending
 		Sender:   sendingUser.UserID,
 		StateKey: &sendingUser.UserID,
 	}
-	// alice sends message with extra query parameter
+
 	event_id := sendingUser.SendEventWithAttachedMediaSynced(t, roomID, picture_message, mxcUri)
 	return mxcUri, event_id
+}
+
+// Check the server's client version endpoint for an unstable feature to be enabled. If it is not found, skip the test
+func SkipTestIfNotCapable(t *testing.T, client *client.CSAPI, feature string) {
+	versionsObject := client.GetVersions(t)
+	unstableFeatures := gjson.GetBytes(versionsObject, "unstable_features")
+
+	thingEnabled := unstableFeatures.Get(feature)
+	if thingEnabled.Type != gjson.True {
+		t.Skipf("%s not supported on this homeserver", feature)
+	}
+
 }
