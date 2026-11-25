@@ -1,11 +1,8 @@
 package csapi_tests
 
 import (
-	"encoding/base64"
 	"fmt"
 	"testing"
-
-	"math/rand"
 
 	"github.com/matrix-org/complement"
 	"github.com/matrix-org/complement/client"
@@ -22,37 +19,18 @@ import (
 //  1. `/sync`'s `device_lists.changed/left` contain the correct user IDs.
 //  2. `/keys/query` returns the correct information after device list updates.
 func TestDeviceListUpdates(t *testing.T) {
-	prng := rand.New(rand.NewSource(42))
 	// uploadNewKeys uploads a new set of keys for a given client.
 	// Returns a check function that can be passed to mustQueryKeys.
 	uploadNewKeys := func(t *testing.T, user *client.CSAPI) []match.JSON {
 		t.Helper()
 		ed25519KeyID := fmt.Sprintf("ed25519:%s", user.DeviceID)
 		curve25519KeyID := fmt.Sprintf("curve25519:%s", user.DeviceID)
-		// generate key-like looking values
-		ed25519KeyBytes := make([]byte, 32)
-		_, err := prng.Read(ed25519KeyBytes)
-		must.NotError(t, "failed to read from prng", err)
-		ed25519Key := base64.RawStdEncoding.EncodeToString(ed25519KeyBytes)
-		curve25519KeyBytes := make([]byte, 32)
-		_, err = prng.Read(curve25519KeyBytes)
-		must.NotError(t, "failed to read from prng", err)
-		curve25519Key := base64.RawStdEncoding.EncodeToString(curve25519KeyBytes)
 
-		user.MustDo(t, "POST", []string{"_matrix", "client", "v3", "keys", "upload"},
-			client.WithJSONBody(t, map[string]interface{}{
-				"device_keys": map[string]interface{}{
-					"user_id":    user.UserID,
-					"device_id":  user.DeviceID,
-					"algorithms": []interface{}{"m.olm.v1.curve25519-aes-sha2", "m.megolm.v1.aes-sha2"},
-					"keys": map[string]interface{}{
-						ed25519KeyID:    ed25519Key,
-						curve25519KeyID: curve25519Key,
-					},
-					"signatures": map[string]interface{}{},
-				},
-			}),
-		)
+		deviceKeys, _ := user.MustGenerateOneTimeKeys(t, 0)
+		user.MustUploadKeys(t, deviceKeys, nil)
+		keys := deviceKeys["keys"].(map[string]any)
+		ed25519Key := keys[ed25519KeyID]
+		curve25519Key := keys[curve25519KeyID]
 
 		algorithmsPath := fmt.Sprintf("device_keys.%s.%s.algorithms", user.UserID, user.DeviceID)
 		ed25519Path := fmt.Sprintf("device_keys.%s.%s.keys.%s", user.UserID, user.DeviceID, ed25519KeyID)
@@ -125,7 +103,18 @@ func TestDeviceListUpdates(t *testing.T) {
 		})
 
 		// The observing user must share a room with the dummy barrier user.
-		roomID := barry.MustCreateRoom(t, map[string]interface{}{"preset": "public_chat"})
+		roomID := barry.MustCreateRoom(t, map[string]interface{}{
+			"preset": "public_chat",
+			"initial_state": []map[string]interface{}{
+				{
+					"type":      "m.room.encryption",
+					"state_key": "",
+					"content": map[string]interface{}{
+						"algorithm": "m.megolm.v1.aes-sha2",
+					},
+				},
+			},
+		})
 		observingUser.MustJoinRoom(t, roomID, []spec.ServerName{
 			deployment.GetFullyQualifiedHomeserverName(t, otherHSName),
 		})
@@ -160,7 +149,18 @@ func TestDeviceListUpdates(t *testing.T) {
 		barrier := makeBarrier(t, deployment, alice, otherHSName)
 		checkBobKeys := uploadNewKeys(t, bob)
 
-		roomID := alice.MustCreateRoom(t, map[string]interface{}{"preset": "public_chat"})
+		roomID := alice.MustCreateRoom(t, map[string]interface{}{
+			"preset": "public_chat",
+			"initial_state": []map[string]interface{}{
+				{
+					"type":      "m.room.encryption",
+					"state_key": "",
+					"content": map[string]interface{}{
+						"algorithm": "m.megolm.v1.aes-sha2",
+					},
+				},
+			},
+		})
 		t.Logf("%s created test room %s.", alice.UserID, roomID)
 
 		// Alice performs an initial sync
@@ -215,7 +215,18 @@ func TestDeviceListUpdates(t *testing.T) {
 		barrier := makeBarrier(t, deployment, alice, otherHSName)
 		checkBobKeys := uploadNewKeys(t, bob)
 
-		roomID := bob.MustCreateRoom(t, map[string]interface{}{"preset": "public_chat"})
+		roomID := bob.MustCreateRoom(t, map[string]interface{}{
+			"preset": "public_chat",
+			"initial_state": []map[string]interface{}{
+				{
+					"type":      "m.room.encryption",
+					"state_key": "",
+					"content": map[string]interface{}{
+						"algorithm": "m.megolm.v1.aes-sha2",
+					},
+				},
+			},
+		})
 		t.Logf("%s created test room %s.", bob.UserID, roomID)
 
 		// Alice performs an initial sync
@@ -268,7 +279,18 @@ func TestDeviceListUpdates(t *testing.T) {
 		barrier := makeBarrier(t, deployment, alice, otherHSName)
 		checkBobKeys := uploadNewKeys(t, bob)
 
-		roomID := alice.MustCreateRoom(t, map[string]interface{}{"preset": "public_chat"})
+		roomID := alice.MustCreateRoom(t, map[string]interface{}{
+			"preset": "public_chat",
+			"initial_state": []map[string]interface{}{
+				{
+					"type":      "m.room.encryption",
+					"state_key": "",
+					"content": map[string]interface{}{
+						"algorithm": "m.megolm.v1.aes-sha2",
+					},
+				},
+			},
+		})
 		t.Logf("%s created test room %s.", alice.UserID, roomID)
 
 		// Bob joins the room
@@ -327,7 +349,18 @@ func TestDeviceListUpdates(t *testing.T) {
 		barrier := makeBarrier(t, deployment, alice, otherHSName)
 		checkBobKeys := uploadNewKeys(t, bob)
 
-		roomID := bob.MustCreateRoom(t, map[string]interface{}{"preset": "public_chat"})
+		roomID := bob.MustCreateRoom(t, map[string]interface{}{
+			"preset": "public_chat",
+			"initial_state": []map[string]interface{}{
+				{
+					"type":      "m.room.encryption",
+					"state_key": "",
+					"content": map[string]interface{}{
+						"algorithm": "m.megolm.v1.aes-sha2",
+					},
+				},
+			},
+		})
 		t.Logf("%s created test room %s.", bob.UserID, roomID)
 
 		// Alice joins the room
@@ -386,7 +419,18 @@ func TestDeviceListUpdates(t *testing.T) {
 		barrier := makeBarrier(t, deployment, alice, otherHSName)
 		checkBobKeys := uploadNewKeys(t, bob)
 
-		roomID := alice.MustCreateRoom(t, map[string]interface{}{"preset": "public_chat"})
+		roomID := alice.MustCreateRoom(t, map[string]interface{}{
+			"preset": "public_chat",
+			"initial_state": []map[string]interface{}{
+				{
+					"type":      "m.room.encryption",
+					"state_key": "",
+					"content": map[string]interface{}{
+						"algorithm": "m.megolm.v1.aes-sha2",
+					},
+				},
+			},
+		})
 		t.Logf("%s created test room %s.", alice.UserID, roomID)
 
 		// Bob joins the room
